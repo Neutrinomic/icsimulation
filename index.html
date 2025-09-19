@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ICP Tokenomics Simulator</title>
+  <style>
+    :root {
+      --bg: #0f1220;
+      --panel: #161a2b;
+      --text: #e8ebff;
+      --muted: #a8b0d3;
+      --accent: #6ea8fe;
+      --good: #2ecc71;
+      --warn: #f39c12;
+      --bad: #e74c3c;
+      --border: #232742;
+      --purple: #b084f5;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 24px auto 40px;
+      padding: 0 16px;
+    }
+    h1 {
+      font-size: 22px;
+      margin: 0 0 10px;
+      letter-spacing: 0.2px;
+    }
+    .sub {
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .card h2 {
+      font-size: 16px;
+      margin: 0 0 8px;
+      color: var(--accent);
+      letter-spacing: 0.2px;
+    }
+    label {
+      display: block;
+      margin: 10px 0 6px;
+      color: var(--muted);
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    input[type="number"], select {
+      width: 100%;
+      background: #0d1020;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .value {
+      min-width: 92px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .out {
+      font-variant-numeric: tabular-nums;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px 12px;
+      align-items: center;
+    }
+    .out .k { color: var(--muted); }
+    .out .v { text-align: right; }
+    .hl-usd { color: var(--good); font-weight: 600; }
+    .hl-icp { color: var(--purple); font-weight: 600; }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .hr { height: 1px; background: var(--border); margin: 10px 0; }
+    .ratio {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .bar {
+      position: relative;
+      flex: 1;
+      height: 10px;
+      background: #0d1020;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar > span {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: var(--good);
+    }
+    .bar > span.staker { background: var(--good); }
+    .bar > span.nodes { background: var(--warn); }
+    .row-inline {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      background: #0d1020;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    /* Hero metrics */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 14px;
+      margin: 14px 0 16px;
+    }
+    .hero-card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.05));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+    .hero-card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      color: var(--accent);
+      letter-spacing: 0.2px;
+    }
+    .metrics-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .metric-box {
+      background: #0d1020;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .metric-big {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+  </style>
+  <script>
+    // Core constants (editable in UI where relevant)
+    const APY = 0.135;                 // 13.5% APY for stakers
+    const XDR_PER_NODE_PER_MONTH = 1500; // Nodes mint 1500 XDR per month (per node)
+    const USD_PER_XDR = 1.44;           // 1 XDR = $1.44
+    const CAPEX_PER_NODE = 15000;       // $15k initial cost per node
+    const OPEX_PER_NODE_MONTH = 200;    // $200 per month per node
+
+    function $(id) { return document.getElementById(id); }
+
+    function fmtUSD(n) {
+      if (!isFinite(n)) return '-';
+      return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+    }
+    function fmtUSD2(n) {
+      if (!isFinite(n)) return '-';
+      return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+    }
+    function fmtNum(n, digits = 2) {
+      if (!isFinite(n)) return '-';
+      return n.toLocaleString(undefined, { maximumFractionDigits: digits });
+    }
+
+    function update() {
+      const priceStake = parseFloat($("priceStake").value);
+      const priceCurrent = parseFloat($("priceCurrent").value);
+      const stakeIcp = parseFloat($("stakeIcp").value) || 0;
+      const nodes = parseInt($("nodes").value || '0', 10);
+      $("priceStakeVal").textContent = `$${priceStake.toFixed(2)}`;
+      $("priceCurrentVal").textContent = `$${priceCurrent.toFixed(2)}`;
+      $("nodesVal").textContent = fmtNum(nodes, 0);
+
+      // Staker earnings in ICP
+      const rate = APY; // per year
+      const stakerIcpEarn = stakeIcp * rate;
+
+      // Choose valuation price
+      const chosenPrice = priceCurrent; // always value at current price
+      const stakerUsdEarn = stakerIcpEarn * chosenPrice;
+
+      // Effective USD APY for rewards (relative to initial USD principal at stake-time)
+      // Formula: APY_icp * (valuation_price / stake_price)
+      const priceFactor = priceStake > 0 ? (chosenPrice / priceStake) : 0;
+      const usdApy = APY * priceFactor;        // annual
+      const usdMonthly = (APY / 12) * priceFactor; // monthly equivalent (simple)
+
+      // Nodes minting in USD
+      const nodesUsdPerMonth = nodes * XDR_PER_NODE_PER_MONTH * USD_PER_XDR;
+      const nodesUsd = nodesUsdPerMonth * 12; // per year
+
+      // Optional: convert node rewards to ICP at current price (informational)
+      const nodesIcp = priceCurrent > 0 ? nodesUsd / priceCurrent : 0;
+
+      // Render outputs
+      $("out_staker_icp").textContent = fmtNum(stakerIcpEarn, 6) + ' ICP';
+      $("out_staker_usd").textContent = fmtUSD2(stakerUsdEarn);
+      $("out_nodes_usd").textContent = fmtUSD(nodesUsd);
+      $("out_nodes_icp").textContent = isFinite(nodesIcp) ? fmtNum(nodesIcp) + ' ICP' : '-';
+      $("out_staker_usd_apy").textContent = `${fmtNum(usdApy * 100, 2)}% (≈ ${fmtNum(usdMonthly * 100, 2)}%/mo)`;
+      $("out_staker_apy_icp").textContent = `${fmtNum(APY * 100, 2)}%`;
+      // Hero metrics
+      $("hero_staker_usd").textContent = `${fmtNum(usdApy * 100, 2)}%`;
+      $("hero_staker_icp").textContent = `${fmtNum(APY * 100, 2)}%`;
+      // Split (stakers vs nodes) will be computed on equal-dollar basis after ROI section
+
+      // Also show per-node and per-ICP helper notes
+      const perNodeUsdMonth = XDR_PER_NODE_PER_MONTH * USD_PER_XDR;
+      $("note_per_node").textContent = `${fmtUSD2(perNodeUsdMonth)} per node per month`;
+      const perIcpYearUsdAtCurrent = 1 * APY * priceCurrent;
+      $("note_per_icp").innerHTML = `Per 1 ICP staked (per year) at current price: ${fmtUSD2(perIcpYearUsdAtCurrent)}`;
+
+      // Node ROI calculations
+      const perNodeRevMo = perNodeUsdMonth;
+      const perNodeRevYr = perNodeRevMo * 12;
+      const perNodeOpexMo = OPEX_PER_NODE_MONTH;
+      const perNodeOpexYr = perNodeOpexMo * 12;
+      const perNodeNetMo = perNodeRevMo - perNodeOpexMo;
+      const perNodeNetYr = perNodeRevYr - perNodeOpexYr;
+      const perNodeAPY = CAPEX_PER_NODE > 0 ? perNodeNetYr / CAPEX_PER_NODE : 0; // USD terms
+      const perNodeAPY_ICP = (CAPEX_PER_NODE > 0 && priceCurrent > 0 && priceStake > 0)
+        ? perNodeAPY * (priceStake / priceCurrent)
+        : 0; // ICP terms: ROI in ICP using initial ICP principal @ stake price
+      const perNodePaybackMonths = perNodeNetMo > 0 ? (CAPEX_PER_NODE / perNodeNetMo) : Infinity;
+
+      $("roi_node_rev_mo").textContent = fmtUSD2(perNodeRevMo);
+      $("roi_node_opex_mo").textContent = fmtUSD2(perNodeOpexMo);
+      $("roi_node_net_mo").textContent = fmtUSD2(perNodeNetMo);
+      $("roi_node_net_yr").textContent = fmtUSD(perNodeNetYr);
+      $("roi_node_apy").textContent = `${fmtNum(perNodeAPY * 100, 2)}%`;
+      $("roi_node_apy_icp").textContent = `${fmtNum(perNodeAPY_ICP * 100, 2)}%`;
+      $("roi_node_payback").textContent = isFinite(perNodePaybackMonths) ? `${fmtNum(perNodePaybackMonths, 1)} months` : 'n/a';
+      // Hero node metrics
+      $("hero_node_usd").textContent = `${fmtNum(perNodeAPY * 100, 2)}%`;
+      $("hero_node_icp").textContent = `${fmtNum(perNodeAPY_ICP * 100, 2)}%`;
+
+      // Stakers vs Nodes split on equal initial dollar spend (stake-time price)
+      const initialUsd = stakeIcp * priceStake; // USD spent to acquire ICP
+      const stakerEarnSameDollar = stakerUsdEarn; // equals initialUsd * usdApy
+      const nodeEarnSameDollar = initialUsd * perNodeAPY; // net USD using same capex
+
+      const totalSameDollar = stakerEarnSameDollar + nodeEarnSameDollar;
+      const stakerSharePct = totalSameDollar > 0 ? (stakerEarnSameDollar / totalSameDollar) * 100 : 0;
+      const nodesSharePct = 100 - stakerSharePct;
+      const stakerShareInt = Math.round(stakerSharePct);
+      const nodesShareInt = 100 - stakerShareInt;
+      $("out_ratio").textContent = `${stakerShareInt} / ${nodesShareInt}`;
+      const stW = Math.max(0, Math.min(100, stakerSharePct));
+      const ndW = Math.max(0, Math.min(100, nodesSharePct));
+      $("ratio_staker").style.width = stW + '%';
+      $("ratio_nodes").style.left = stW + '%';
+      $("ratio_nodes").style.width = ndW + '%';
+    }
+
+    function init() {
+      // Wire events
+      ["priceStake","priceCurrent","stakeIcp","nodes"].forEach(id => {
+        $(id).addEventListener('input', update);
+        $(id).addEventListener('change', update);
+      });
+      update();
+    }
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+  <meta name="description" content="Interactive sliders to explore ICP tokenomics: staker APY vs node XDR minting with price scenarios." />
+  <meta name="color-scheme" content="dark light" />
+  <link rel="icon" href="data:," />
+</head>
+  <body>
+    <div class="wrap">
+      <h1>ICP Tokenomics Simulator</h1>
+      <div class="sub">Move the sliders to compare staker earnings (13.5% APY on ICP, valued at current price) vs node minting (1500 XDR per node per month @ $1.44/XDR). Values shown are per year and recompute live.</div>
+
+      <div class="hero-grid">
+        <div class="hero-card">
+          <h3>Staker APY</h3>
+          <div class="metrics-row">
+            <div class="metric-box">
+              <div class="metric-label">APY USD</div>
+              <div id="hero_staker_usd" class="metric-big hl-usd">-</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">APY ICP</div>
+              <div id="hero_staker_icp" class="metric-big hl-icp">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="hero-card">
+          <h3>Node ROI APY</h3>
+          <div class="metrics-row">
+            <div class="metric-box">
+              <div class="metric-label">APY USD</div>
+              <div id="hero_node_usd" class="metric-big hl-usd">-</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">APY ICP</div>
+              <div id="hero_node_icp" class="metric-big hl-icp">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    <div class="grid" style="margin-bottom: 10px;">
+      <div class="card">
+        <h2>Prices</h2>
+        <label for="priceStake">ICP price at staking ($1.9–$50)</label>
+        <div class="row">
+          <input id="priceStake" type="range" min="1.9" max="50" step="0.1" value="10" />
+          <div id="priceStakeVal" class="value">$10.00</div>
+        </div>
+
+        <label for="priceCurrent">Current ICP price ($1.9–$200)</label>
+        <div class="row">
+          <input id="priceCurrent" type="range" min="1.9" max="200" step="0.1" value="10" />
+          <div id="priceCurrentVal" class="value">$10.00</div>
+        </div>
+        
+      </div>
+
+      <div class="card">
+        <h2>Inputs</h2>
+        <label for="stakeIcp">Your staked ICP</label>
+        <input id="stakeIcp" type="number" min="0" step="0.01" value="1000" />
+
+        <label for="nodes">Number of nodes (500–10,000)</label>
+        <div class="row">
+          <input id="nodes" type="range" min="500" max="10000" step="1" value="1440" />
+          <div id="nodesVal" class="value">1440</div>
+        </div>
+
+        <div class="hint">
+          Assumptions: APY 13.5% (simple), nodes mint 1500 XDR per node per month @ $1.44/XDR.
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Staker Earnings (per year)</h2>
+        <div class="out">
+          <div class="k">ICP earned</div><div id="out_staker_icp" class="v">-</div>
+          <div class="k">USD value</div><div id="out_staker_usd" class="v">-</div>
+          <div class="k">APY USD (vs initial $)</div><div id="out_staker_usd_apy" class="v hl-usd">-</div>
+          <div class="k">APY ICP</div><div id="out_staker_apy_icp" class="v hl-icp">-</div>
+        </div>
+        <div class="hint" id="note_per_icp">&nbsp;</div>
+      </div>
+
+      <div class="card">
+        <h2>Node Minting (per year)</h2>
+        <div class="out">
+          <div class="k">USD minted</div><div id="out_nodes_usd" class="v">-</div>
+          <div class="k">Equivalent ICP @ current</div><div id="out_nodes_icp" class="v">-</div>
+        </div>
+        <div class="hint" id="note_per_node">&nbsp;</div>
+      </div>
+
+      <div class="card">
+        <h2>Node ROI</h2>
+        <div class="out">
+          <div class="k">Per node revenue (mo)</div><div id="roi_node_rev_mo" class="v">-</div>
+          <div class="k">Per node opex (mo)</div><div id="roi_node_opex_mo" class="v">-</div>
+          <div class="k">Per node net (mo)</div><div id="roi_node_net_mo" class="v">-</div>
+          <div class="k">Per node net (yr)</div><div id="roi_node_net_yr" class="v">-</div>
+          <div class="k">APY USD</div><div id="roi_node_apy" class="v hl-usd">-</div>
+          <div class="k">APY ICP</div><div id="roi_node_apy_icp" class="v hl-icp">-</div>
+          <div class="k">Payback period</div><div id="roi_node_payback" class="v">-</div>
+        </div>
+        
+        <div class="hint">Assumes $15,000 capex per node and $200/month opex. APY USD = net yearly / capex. APY ICP scales by (stake price / current price), valuing principal at stake-time price. Payback = capex / net monthly.</div>
+      </div>
+
+      <div class="card">
+        <h2>Stakers vs Nodes (per year)</h2>
+        <div class="out" style="margin-bottom: 10px;">
+          <div class="k">Split (stakers / nodes)</div><div id="out_ratio" class="v">-</div>
+        </div>
+        <div class="ratio">
+          <div class="bar">
+            <span id="ratio_staker" class="staker"></span>
+            <span id="ratio_nodes" class="nodes"></span>
+          </div>
+        </div>
+        <div class="hint">Equal-dollar split: uses the same initial USD (stake-time price) to compare yearly earnings — staking vs node ROI (net of opex).</div>
+      </div>
+    </div>
+
+    <div class="hint" style="margin-top: 14px;">
+      Notes: This is a simplified model for exploration only. APY treated simply (no compounding). XDR peg fixed at $1.44. Node rewards assumed 1500 XDR per node per month. Set your own stake and node count.
+    </div>
+  </div>
+</body>
+<!-- Open this file directly in your browser. -->
+<!-- Made minimal, no frameworks. -->
+</html>
